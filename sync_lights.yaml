@@ -1,0 +1,62 @@
+blueprint:
+  name: Sync Light States
+  description: Synchronizes multiple slave lights with a master light (on/off, brightness, and color temperature with automatic range adjustment)
+  domain: automation
+  input:
+    master_light:
+      name: Master Light
+      description: The light that serves as the source for synchronization
+      selector:
+        entity:
+          domain: light
+    slave_lights:
+      name: Slave Lights
+      description: The lights that will be synchronized with the master light
+      selector:
+        entity:
+          domain: light
+          multiple: true
+
+variables:
+  master_light: !input master_light
+  slave_lights: !input slave_lights
+
+triggers:
+  - trigger: state
+    entity_id: !input master_light
+
+conditions: []
+
+actions:
+  - choose:
+      - conditions:
+          - condition: state
+            entity_id: !input master_light
+            state: "off"
+        sequence:
+          - target:
+              entity_id: !input slave_lights
+            action: light.turn_off
+      - conditions:
+          - condition: state
+            entity_id: !input master_light
+            state: "on"
+        sequence:
+          - repeat:
+              for_each: !input slave_lights
+              sequence:
+                - target:
+                    entity_id: "{{ repeat.item }}"
+                  data: >
+                    {% set data = {'brightness': state_attr(master_light, 'brightness') | int(255)} %}
+                    {% set source_temp = state_attr(master_light, 'color_temp_kelvin') %}
+                    {% if source_temp is not none %}
+                      {% set target_min = state_attr(repeat.item, 'min_color_temp_kelvin') | int(2000) %}
+                      {% set target_max = state_attr(repeat.item, 'max_color_temp_kelvin') | int(6500) %}
+                      {% set temp = [target_min, [source_temp, target_max] | min] | max | int %}
+                      {% set data = dict(data, color_temp_kelvin=temp) %}
+                    {% endif %}
+                    {{ data }}
+                  action: light.turn_on
+
+mode: restart
